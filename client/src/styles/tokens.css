@@ -1,0 +1,103 @@
+/* ============================================================================
+   Design tokens — semantic aliases on top of the existing CSS variables in
+   index.css. All existing variable names keep working; these aliases add
+   semantic meaning without changing rendered values.
+   ============================================================================ */
+
+/* ── Surface aliases (light theme) ── */
+:root {
+  /* base page background */
+  --surface-base: var(--bg-primary);
+  /* sheet — cards, modals, panels */
+  --surface-sheet: var(--bg-secondary);
+  /* raised — floating elements that lift off the sheet */
+  --surface-raised: var(--bg-elevated);
+
+  /* ── Ink aliases ── */
+  --ink-1: var(--text-primary);   /* headings, primary labels */
+  --ink-2: var(--text-secondary); /* body text, secondary labels */
+  --ink-3: var(--text-muted);     /* captions, hints, placeholders */
+
+  /* ── Line aliases ── */
+  --line: var(--border);          /* default hairlines */
+  --line-strong: var(--border-active); /* focused / active borders */
+
+  /* ── Accent aliases ── */
+  --accent: var(--accent);        /* primary brand accent */
+  --accent-ink: var(--text-primary); /* text on accent background */
+
+  /* ── Status aliases ── */
+  --status-ok: var(--success);
+  --status-warn: var(--warning);
+  --status-error: var(--error);
+}
+
+/* Dark theme overrides for aliases — keep same semantic mapping */
+[data-theme='dark'] {
+  --surface-base: var(--bg-primary);
+  --surface-sheet: var(--bg-secondary);
+  --surface-raised: var(--bg-elevated);
+  --ink-1: var(--text-primary);
+  --ink-2: var(--text-secondary);
+  --ink-3: var(--text-muted);
+  --line: var(--border);
+  --line-strong: var(--border-active);
+  --accent: var(--accent);
+  --accent-ink: var(--text-primary);
+  --status-ok: var(--success);
+  --status-warn: var(--warning);
+  --status-error: var(--error);
+}
+
+/* ── Radii ── */
+:root {
+  --radius-sheet: 4px;   /* cards, sheets, panels */
+  --radius-control: 6px; /* buttons, inputs, controls */
+}
+
+/* ── Shadows ── */
+:root {
+  --shadow-sheet: 0 1px 3px 0 rgba(36, 41, 35, 0.1),
+                  0 1px 2px -1px rgba(36, 41, 35, 0.1);
+  --shadow-raised: 0 10px 15px -3px rgba(36, 41, 35, 0.1),
+                   0 4px 6px -4px rgba(36, 41, 35, 0.1);
+}
+
+/* ── Global prefers-reduced-motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── ScissorReveal component styles ── */
+.scissor-reveal-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--surface-sheet);
+  z-index: 10000;
+  display: block;
+}
+
+.scissor-reveal-blade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50vw;
+  background: var(--surface-sheet);
+}
+
+.scissor-reveal-left {
+  left: 0;
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+
+.scissor-reveal-right {
+  right: 0;
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}

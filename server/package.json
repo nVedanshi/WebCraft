@@ -1,0 +1,40 @@
+{
+  "name": "@webcraft/server",
+  "version": "2.0.0",
+  "private": true,
+  "description": "WebCraft 2.0 backend - Express, Zod, Prisma, BullMQ",
+  "type": "module",
+  "scripts": {
+    "build": "node --check src/index.js && node --check src/app.js && node --check src/config/index.js && node --check src/middleware/error.js && node --check src/middleware/auth.js && node --check src/middleware/validation.js && node --check src/lib/prisma.js && node --check src/lib/redis.js && node --check src/lib/jwt.js && echo 'Backend build OK'",
+    "dev": "node --watch src/index.js",
+    "start": "node src/app.js",
+    "db:generate": "prisma generate",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:seed": "node prisma/seed.js",
+    "db:studio": "prisma studio",
+    "lint": "node scripts/check-syntax.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@prisma/client": "^5.22.0",
+    "bcryptjs": "^2.4.3",
+    "bullmq": "^5.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.0.0",
+    "helmet": "^7.0.0",
+    "ioredis": "^5.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "openai": "^7.57.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0",
+    "supertest": "^7.0.0",
+    "vitest": "^2.0.0"
+  }
+}

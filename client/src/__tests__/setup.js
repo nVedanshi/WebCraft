@@ -1,0 +1,1 @@
+// Client test setup: jsdom environment provides DOM + localStorage.

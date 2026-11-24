@@ -1,0 +1,614 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+  DELETED
+  PUBLISHED
+}
+
+enum GenerationJobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum SubscriptionTier {
+  FREE
+  PRO
+  BUSINESS
+}
+
+enum CreditTransactionType {
+  PURCHASE
+  CONSUME
+  REFUND
+  RESERVE
+  RELEASE
+  ALLOCATE
+  ADJUST
+}
+
+enum WebhookEventStatus {
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+enum MemberRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+model User {
+  id              String              @id @default(cuid())
+  email           String              @unique
+  passwordHash    String
+  name            String?
+  /// Total remaining spendable credits = purchasedCredits + free/subscription allowance
+  credits         Int                 @default(0)
+  /// Persistent credits (purchases, refunds, positive admin adjustments).
+  /// Never erased by the daily no-rollover reset.
+  purchasedCredits Int                @default(0)
+  reservedCredits Int                 @default(0)
+  /// Lifetime consumed credits (for usage reporting).
+  totalConsumedCredits Int            @default(0)
+  /// Whether the one-time signup grant (50 credits for FREE tier) has been applied.
+  signupCreditsGranted Boolean        @default(false)
+  tier            SubscriptionTier    @default(FREE)
+  emailVerified   Boolean             @default(false)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  projects               Project[]
+  projectMembers         ProjectMember[]
+  invitedMembers         ProjectMember[] @relation("MemberInviter")
+  chatSessions           ChatSession[]
+  payments               Payment[]
+  subscription           Subscription?
+  creditTransactions     CreditTransaction[]
+  llmUsage               LLMUsage[]
+  generationJobs         GenerationJob[]
+  dailyCreditAllocations DailyCreditAllocation[]
+  creditReservations     CreditReservation[]
+  spendingLimit          SpendingLimit?
+  providerConfigs        ProviderConfig[] @relation("ProviderConfigUser")
+  githubProjects         GitHubProject[]
+  githubSyncRecords      GitHubSyncRecord[]
+  deployments            Deployment[]
+  passwordResetTokens    PasswordResetToken[]
+
+  @@index([email])
+  @@index([createdAt])
+}
+
+/// PasswordResetToken — single-use, time-limited tokens for password reset,
+/// email verification, and account deletion confirmation. Tokens are stored as
+/// SHA-256 hashes only; plaintext never persists.
+model PasswordResetToken {
+  id          String   @id @default(cuid())
+  userId      String
+  tokenHash   String   @unique
+  type        String   // "password_reset" | "email_verification" | "account_deletion"
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@index([type])
+}
+
+/// ProjectMember — links a user to a project with a role-based access level.
+/// One record per (projectId, userId). The project's owner (userId on Project)
+/// is implicitly OWNER and does NOT require a ProjectMember row, though one may
+/// be created for uniformity.
+model ProjectMember {
+  id        String   @id @default(cuid())
+  projectId String
+  userId    String
+  role      MemberRole @default(VIEWER)
+  invitedBy String?
+  invitedAt DateTime @default(now())
+  acceptedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  inviter   User?     @relation("MemberInviter", fields: [invitedBy], references: [id])
+
+  @@unique([projectId, userId])
+  @@index([projectId])
+  @@index([userId])
+  @@index([role])
+}
+
+model Project {
+  id            String            @id @default(cuid())
+  userId        String
+  name          String
+  description   String?
+  status        ProjectStatus     @default(ACTIVE)
+  revisionId    String            @default(cuid())
+  settings      Json              @default("{}")
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  archivedAt    DateTime?
+  deletedAt     DateTime?
+  /// Whether this project has a published snapshot
+  isPublished   Boolean           @default(false)
+  /// When the project was last published
+  publishedAt   DateTime?
+  /// Public URL of the deployed application
+  deploymentUrl String?
+  /// RevisionId of the draft (editable) version — same as revisionId unless
+  /// a publish has occurred and subsequent draft edits diverged
+  draftRevisionId  String?
+  /// RevisionId of the last published snapshot
+  publishedRevisionId String?
+
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  members       ProjectMember[]
+  files         ProjectFile[]
+  versions      ProjectVersion[]
+  chatSessions  ChatSession[]
+  generationJobs GenerationJob[]
+  githubProjects GitHubProject[]
+  githubSyncRecords GitHubSyncRecord[]
+  deployments   Deployment[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([isPublished])
+  @@index([updatedAt])
+}
+
+model ProjectFile {
+  id        String   @id @default(cuid())
+  projectId String
+  path      String
+  content   String   @default("")
+  type      String   @default("file")
+  size      Int      @default(0)
+  mimeType  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, path])
+  @@index([projectId])
+  @@index([path])
+}
+
+model ProjectVersion {
+  id          String   @id @default(cuid())
+  projectId   String
+  revisionId  String
+  label       String?
+  createdAt   DateTime @default(now())
+  createdBy   String?
+  fileCount   Int      @default(0)
+  totalSize   Int      @default(0)
+  artifactId  String?
+  /// Snapshot of all file contents at version time (for immutability and rollback)
+  snapshot    Json     @default("{}") // { [path: string]: { content, type, size, mimeType } }
+
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  deployments Deployment[]
+
+  @@index([projectId])
+  @@index([createdAt])
+  @@index([revisionId])
+}
+
+model ChatSession {
+  id        String   @id @default(cuid())
+  projectId String
+  userId    String
+  title     String   @default("New chat")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  ChatMessage[]
+
+  @@index([projectId])
+  @@index([userId])
+  @@index([updatedAt])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      ChatRole
+  content   String
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([createdAt])
+}
+
+model GenerationJob {
+  id          String              @id @default(cuid())
+  projectId   String
+  userId      String
+  type        String              @default("generate")
+  prompt      String?
+  status      GenerationJobStatus @default(QUEUED)
+  progress    Int                 @default(0)
+  currentStage String?
+  error       String?
+  resultSummary Json?
+  startedAt   DateTime?
+  completedAt DateTime?
+  artifactId  String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  creditReservations CreditReservation[]
+
+  @@index([projectId])
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model GenerationArtifact {
+  id        String   @id @default(cuid())
+  jobId     String   @unique
+  kind      String
+  storageKey String
+  size      Int
+  mimeType  String?
+  createdAt DateTime @default(now())
+
+  @@index([jobId])
+}
+
+model LLMUsage {
+  id          String   @id @default(cuid())
+  userId      String
+  jobId       String?
+  provider    String
+  model       String
+  inputTokens  Int     @default(0)
+  outputTokens Int     @default(0)
+  totalTokens  Int     @default(0)
+  costCents    Int     @default(0)
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([provider])
+  @@index([createdAt])
+}
+
+model ProviderConfig {
+  id          String   @id @default(cuid())
+  userId      String?
+  provider    String
+  apiKeyEnc   String
+  isDefault   Boolean  @default(false)
+  /// 'system' (default, uses server-side key + WebCraft credits) or
+  /// 'byok' (uses this user's key, no WebCraft credits deducted).
+  billingMode String   @default("system")
+  user        User?    @relation("ProviderConfigUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+  @@index([provider])
+  @@index([billingMode])
+}
+
+model Payment {
+  id                  String   @id @default(cuid())
+  userId              String
+  razorpayOrderId     String   @unique
+  razorpayPaymentId   String?  @unique
+  razorpaySignature   String?
+  amount              Int
+  currency            String   @default("INR")
+  status              PaymentStatus @default(PENDING)
+  creditsPurchased    Int
+  idempotencyKey      String   @unique
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([razorpayOrderId])
+  @@index([idempotencyKey])
+  @@index([status])
+}
+
+model Subscription {
+  id                       String   @id @default(cuid())
+  userId                   String   @unique
+  tier                     SubscriptionTier @default(FREE)
+  razorpaySubscriptionId   String?
+  status                   String   @default("active")
+  currentPeriodStart       DateTime?
+  currentPeriodEnd         DateTime?
+  creditsAllocated         Int      @default(0)
+  creditsConsumed          Int      @default(0)
+  cancelAtPeriodEnd        Boolean  @default(false)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tier])
+  @@index([status])
+  @@index([currentPeriodEnd])
+}
+
+model CreditTransaction {
+  id          String                 @id @default(cuid())
+  userId      String
+  type        CreditTransactionType
+  amount      Int
+  balanceAfter Int
+  reference   String?
+  description String?
+  paymentId   String?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([type])
+}
+
+model WebhookEvent {
+  id        String                 @id @default(cuid())
+  provider  String
+  eventId   String                 @unique
+  status    WebhookEventStatus     @default(PENDING)
+  payload   Json
+  processedAt DateTime?
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@index([eventId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// DailyCreditAllocation — tracks daily free credit grants for FREE tier users.
+/// One record per user per UTC day. Resets automatically at 00:00 UTC.
+/// Unused credits do not roll over.
+model DailyCreditAllocation {
+  id               String   @id @default(cuid())
+  userId           String
+  allocationDate   DateTime
+  creditsGranted   Int      @default(0)
+  creditsConsumed  Int      @default(0)
+  resetAt          DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, allocationDate])
+  @@index([userId])
+  @@index([allocationDate])
+}
+
+/// PricingModel — historical pricing records for auditability.
+/// Stores the actual provider pricing and WebCraft markup at a point in time.
+/// Previous transactions remain auditable even when pricing changes.
+model PricingModel {
+  id              String   @id @default(cuid())
+  provider        String
+  model           String
+  inputCostPer1M  Float
+  outputCostPer1M Float
+  markupPercent   Float
+  creditPerUsd    Float
+  effectiveFrom   DateTime @default(now())
+  effectiveTo     DateTime?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  @@index([provider, model])
+  @@index([isActive])
+  @@index([effectiveFrom])
+}
+
+/// CreditReservation — tracks reserved credits pending generation completion.
+/// Credits are reserved before generation starts and either consumed
+/// (on success) or released/refunded (on failure).
+model CreditReservation {
+  id           String   @id @default(cuid())
+  userId       String
+  jobId        String?
+  amount       Int
+  status       String   @default("pending")
+  reservedAt   DateTime @default(now())
+  consumedAt   DateTime?
+  releasedAt   DateTime?
+  reason       String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job     GenerationJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([jobId])
+  @@index([status])
+}
+
+/// Template — catalog record for a starter template. Templates are published
+/// by the platform and users can create projects from them.
+model Template {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String
+  category    String   // SaaS, portfolio, e-commerce, dashboard, landing-page, blog, productivity, business
+  stack       Json     @default("{}") // { framework, styling, database, ... }
+  previewImage String? // URL to a preview screenshot
+  isPublished Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  files       TemplateFile[]
+
+  @@index([category])
+  @@index([isPublished])
+  @@index([slug])
+}
+
+/// TemplateFile — a single source file belonging to a template. Content is
+/// stored inline so it can be copied verbatim into a new user project without
+/// touching the original template.
+model TemplateFile {
+  id        String   @id @default(cuid())
+  templateId String
+  path      String   // e.g. src/App.jsx, package.json, vite.config.js
+  content   String   @default("")
+  type      String   @default("file") // file | directory
+  size      Int      @default(0)
+  createdAt DateTime @default(now())
+
+  template Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, path])
+  @@index([templateId])
+}
+
+/// GitHubProject — links a WebCraft project to a GitHub repository + branch.
+/// Tracks last-synced commit SHA for conflict detection during push/pull/sync.
+model GitHubProject {
+  id              String   @id @default(cuid())
+  projectId       String   @unique(map: "GitHubProject_projectId_key")
+  userId          String
+  owner           String
+  repo            String
+  branch          String
+  lastSyncedCommitSha String?
+  lastSyncedAt    DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([owner, repo])
+}
+
+/// GitHubSyncRecord — tracks sync operations for conflict detection and reporting.
+model GitHubSyncRecord {
+  id             String   @id @default(cuid())
+  projectId      String
+  userId         String
+  type           String   // PUSH | PULL | SYNC
+  status         String   // PENDING | COMPLETED | FAILED | CONFLICT
+  filesChanged   Int      @default(0)
+  commitsPushed  Int      @default(0)
+  conflicts      Json     @default("[]") // [{ path, ours, theirs, base, resolution }]
+  resolvedAt     DateTime?
+  startedAt      DateTime @default(now())
+  completedAt    DateTime?
+  error          String?
+  createdAt      DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([userId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// Deployment — records each publish of a project to a live URL.
+/// Each deployment is tied to a specific ProjectVersion snapshot, making it
+/// immutable and rollback-capable.
+model Deployment {
+  id          String   @id @default(cuid())
+  projectId   String
+  userId      String
+  /// References the snapshot this deployment serves
+  versionId   String
+  /// URL where the deployed app is publicly accessible
+  url         String
+  status      String   @default("BUILDING") // BUILDING | DEPLOYING | LIVE | FAILED | ROLLED_BACK
+  /// Number of files in the snapshot
+  fileCount   Int      @default(0)
+  totalSize   Int      @default(0)
+  buildLogs   String?
+  error       String?
+  deployedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  version   ProjectVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([userId])
+  @@index([versionId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// SpendingLimit — Business plan spending controls.
+model SpendingLimit {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  dailyLimitCents   Int   @default(0)
+  monthlyLimitCents Int   @default(0)
+  alertThresholdCents Int @default(0)
+  currentDailySpendCents Int @default(0)
+  currentMonthlySpendCents Int @default(0)
+  dailySpendResetAt DateTime?
+  monthlySpendResetAt DateTime?
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}

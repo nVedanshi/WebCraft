@@ -100,10 +100,10 @@ export class GeminiAdapter extends LLMProvider {
       },
     })
 
-    return await this._retry(async (attempt) => {
+    return this._retry(async () => {
       try {
         const result = await model.generateContent(
-          this._toGeminiContents(messages),
+          { contents: this._toGeminiContents(messages) },
           { requestOptions: { timeout: modelConfig.timeoutMs } }
         )
 

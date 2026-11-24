@@ -41,7 +41,7 @@ export const config = {
   frontendUrl: optional('FRONTEND_URL', 'http://localhost:5173'),
 
   databaseUrl: required('DATABASE_URL'),
-  redisUrl: optional('REDIS_URL', 'redis://localhost:6379'),
+  redisUrl: optional('REDIS_URL', 'redis://localhost:6380'),
 
   jwtAccessSecret: required('JWT_ACCESS_SECRET'),
   jwtRefreshSecret: required('JWT_REFRESH_SECRET'),

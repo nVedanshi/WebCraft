@@ -1,18 +1,7 @@
--- Add PUBLISHED to ProjectStatus enum
--- PostgreSQL does not support ALTER TYPE ... ADD VALUE inside a transaction,
--- so we create a new enum type and cast. Prisma handles enum migrations
--- differently; we add the value here manually.
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ProjectStatus') THEN
-    CREATE TYPE "ProjectStatus" AS ENUM ('ACTIVE', 'ARCHIVED', 'DELETED', 'PUBLISHED');
-  ELSE
-    -- Add PUBLISHED value if not already present
-    IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE typname = 'ProjectStatus' AND enumlabel = 'PUBLISHED') THEN
-      ALTER TYPE "ProjectStatus" ADD VALUE 'PUBLISHED';
-    END IF;
-  END IF;
-END $$;
+-- Add PUBLISHED to ProjectStatus enum.
+-- (The first version of this migration queried pg_enum.typname, a column that
+-- does not exist, so it failed before changing anything. Needs PostgreSQL 12+.)
+ALTER TYPE "ProjectStatus" ADD VALUE IF NOT EXISTS 'PUBLISHED';
 
 -- Add publish/deploy columns to Project
 ALTER TABLE "Project" ADD COLUMN "isPublished" BOOLEAN NOT NULL DEFAULT false;

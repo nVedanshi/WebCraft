@@ -138,7 +138,13 @@ export function createApp() {
   app.use(`/api/${config.apiVersion}/projects`, projectRoutes)
   app.use(`/api/${config.apiVersion}`, projectFileRoutes)
   app.use(`/api/${config.apiVersion}/generation`, generationRoutes)
-  app.use(`/api/${config.apiVersion}/billing`, paymentRateLimit, billingRoutes)
+  // The strict limiter protects actions that move money (create order, verify, refund,
+  // cancel). Plain reads (balance, history, pricing) and the signature-verified webhook
+  // are covered by the global limiter only, otherwise opening the Billing page would
+  // use up the payment allowance by itself.
+  const paymentWriteLimit = (req, res, next) =>
+    req.method === 'GET' || req.path === '/webhook' ? next() : paymentRateLimit(req, res, next)
+  app.use(`/api/${config.apiVersion}/billing`, paymentWriteLimit, billingRoutes)
   app.use(`/api/${config.apiVersion}/templates`, templateRoutes)
   app.use(`/api/${config.apiVersion}/integrations`, integrationRoutes)
   app.use(`/api/${config.apiVersion}`, previewRoutes)

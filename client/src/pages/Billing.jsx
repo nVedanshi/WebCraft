@@ -313,7 +313,9 @@ export function BillingPage() {
                     ? 'Free Tier — 50 credits per UTC day'
                     : isPro
                     ? 'Pro Tier — $10/month, 200 credits per UTC day'
-                    : 'Business Tier — Pay-as-you-go'}
+                    : subscription?.tier === 'BUSINESS'
+                    ? 'Business Tier — Pay-as-you-go'
+                    : 'Plan details unavailable. Press Refresh.'}
                 </p>
                 {isFree && (
                   <p className="text-xs text-muted mt-1">
@@ -324,7 +326,6 @@ export function BillingPage() {
                   <p className="text-xs text-muted mt-1">
                     Daily credits reset at 00:00 UTC. Subscription renews monthly.
                   </p>
-                )}
                 )}
                 {!paymentsConfig?.configured && (
                   <p className="text-xs text-warning mt-1">

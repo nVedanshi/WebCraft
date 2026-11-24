@@ -5,6 +5,7 @@ import {
   ModelConfig,
 } from '../types.js'
 import { normalizeError } from '../errors.js'
+import { requireGeminiModel } from '../config.js'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 
 /**
@@ -36,13 +37,13 @@ export class GeminiAdapter extends LLMProvider {
     if (!key) {
       throw new Error('GEMINI_API_KEY is not configured')
     }
-    return new GoogleGenerativeAI({ apiKey: key })
+    return new GoogleGenerativeAI(key)
   }
 
   getModelConfig() {
     return new ModelConfig({
       provider: 'gemini',
-      model: 'gemini-1.5-flash',
+      model: requireGeminiModel(),
       maxTokens: 4096,
       temperature: 0.2,
       timeoutMs: 60000,
@@ -99,7 +100,7 @@ export class GeminiAdapter extends LLMProvider {
       },
     })
 
-    const lastError = await this._retry(async (attempt) => {
+    return await this._retry(async (attempt) => {
       try {
         const result = await model.generateContent(
           this._toGeminiContents(messages),
@@ -120,8 +121,6 @@ export class GeminiAdapter extends LLMProvider {
         throw normalizeError(error, 'gemini')
       }
     }, modelConfig.maxRetries)
-
-    throw lastError
   }
 
   async streamComplete(messages, config, onChunk, apiKey) {
@@ -136,7 +135,7 @@ export class GeminiAdapter extends LLMProvider {
       },
     })
 
-    const lastError = await this._retry(async (attempt) => {
+    return await this._retry(async (attempt) => {
       try {
         const stream = await model.generateContentStream(
           this._toGeminiContents(messages),
@@ -174,8 +173,6 @@ export class GeminiAdapter extends LLMProvider {
         throw normalizeError(error, 'gemini')
       }
     }, modelConfig.maxRetries)
-
-    throw lastError
   }
 
   async _retry(fn, maxRetries) {

@@ -33,7 +33,8 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { prisma } from '../../lib/prisma.js'
 import { providerRegistry } from '../../lib/llm/registry.js'
-import { resolveTaskModelConfig, resolveModelConfig } from '../../lib/llm/config.js'
+import { providerFactory } from '../../lib/llm/factory.js'
+import { resolveTaskModelConfig } from '../../lib/llm/config.js'
 import {
   validateAnalysis,
   validatePlan,
@@ -120,14 +121,18 @@ export class GenerationPipeline {
    * @param {number} params.timeoutMs - optional pipeline timeout override (ms)
    * @returns {Promise<Object>} generation result
    */
-  async generate({ userId, prompt, projectName, byokMode = false, apiKey = null, progressCallback, timeoutMs, provider, model, framework, database }) {
+  async generate({ userId, prompt, projectName, projectId, byokMode = false, apiKey = null, progressCallback, timeoutMs }) {
+    // Providers must be registered before any stage runs; otherwise the first
+    // stage throws "LLM provider 'openai' is not registered". Idempotent.
+    providerFactory.registerAll()
+
     if (timeoutMs) this._timeoutMs = timeoutMs
     this._cancelled = false
     this._abortController = null
 
     const stages = []
     const tokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0, estimatedCostCents: 0 }
-    const providerInfo = { provider: provider || null, model: model || null, stages: [] }
+    const providerInfo = { provider: null, model: null, stages: [] }
 
     const emit = (name, status, message, data) => {
       stages.push(new StageResult({ name, status, message, data }))
@@ -135,10 +140,17 @@ export class GenerationPipeline {
     }
 
     try {
+      // If an existing project was supplied, fill it instead of creating a new one
+      let existingProject = null
+      if (projectId) {
+        existingProject = await projectService.getProject(userId, projectId)
+        projectName = projectName || existingProject.name
+      }
+
       // ── Stage 1: Prompt analysis ──
       this._checkCancelled()
       emit('analysis', 'in_progress', 'Analyzing requirements...')
-      const analysis = await this._analyzePrompt(prompt, apiKey, provider, model)
+      const analysis = await this._analyzePrompt(prompt, apiKey)
       emit('analysis', 'completed', `Identified ${analysis.appType} application`, {
         provider: analysis._provider,
         model: analysis._model,
@@ -150,7 +162,7 @@ export class GenerationPipeline {
       // ── Stage 2: Application planning ──
       this._checkCancelled()
       emit('planning', 'in_progress', 'Planning application architecture...')
-      const plan = await this._planApplication(analysis, projectName, apiKey, provider, model)
+      const plan = await this._planApplication(analysis, projectName, apiKey)
       emit('planning', 'completed', `Planned ${plan.pages.length} pages`, {
         provider: plan._provider,
         model: plan._model,
@@ -162,7 +174,7 @@ export class GenerationPipeline {
       // ── Stage 3: File manifest ──
       this._checkCancelled()
       emit('manifest', 'in_progress', 'Generating file manifest...')
-      const manifest = await this._generateManifest(plan, analysis, apiKey, provider, model)
+      const manifest = await this._generateManifest(plan, analysis, apiKey)
       emit('manifest', 'completed', `${manifest.files.length} files planned`, {
         provider: manifest._provider,
         model: manifest._model,
@@ -182,15 +194,9 @@ export class GenerationPipeline {
       // ── Stage 4: Create project ──
       this._checkCancelled()
       emit('project', 'in_progress', 'Creating project...')
-      const project = await projectService.createProject(userId, {
+      const project = existingProject || await projectService.createProject(userId, {
         name: projectName,
         description: plan.description,
-        settings: {
-          framework,
-          database,
-          model,
-          provider,
-        },
       })
 
       // ── Stage 5: Generate and apply files ──
@@ -288,14 +294,15 @@ export class GenerationPipeline {
    * @param {number} params.timeoutMs
    * @returns {Promise<Object>}
    */
-  async modify({ projectId, userId, instruction, expectedRevisionId, byokMode = false, apiKey = null, progressCallback, timeoutMs, provider, model, framework, database }) {
+  async modify({ projectId, userId, instruction, expectedRevisionId, byokMode = false, apiKey = null, progressCallback, timeoutMs }) {
+    providerFactory.registerAll()
     if (timeoutMs) this._timeoutMs = timeoutMs
     this._cancelled = false
     this._abortController = null
 
     const stages = []
     const tokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0, estimatedCostCents: 0 }
-    const providerInfo = { provider: provider || null, model: model || null, stages: [] }
+    const providerInfo = { provider: null, model: null, stages: [] }
 
     const emit = (name, status, message, data) => {
       stages.push(new StageResult({ name, status, message, data }))
@@ -320,7 +327,7 @@ export class GenerationPipeline {
       // ── Stage 1: Analyze modification intent ──
       this._checkCancelled()
       emit('analysis', 'in_progress', 'Analyzing modification request...')
-      const analysis = await this._analyzeModification(instruction, project, existingFileMap, apiKey, provider, model)
+      const analysis = await this._analyzeModification(instruction, project, existingFileMap, apiKey)
       emit('analysis', 'completed', `Identified ${analysis.operations.length} operations`, {
         provider: analysis._provider,
         model: analysis._model,
@@ -457,10 +464,10 @@ export class GenerationPipeline {
 
   // ── Private pipeline stages ──
 
-  async _analyzePrompt(prompt, apiKey, providerName, modelName) {
+  async _analyzePrompt(prompt, apiKey) {
     this._checkCancelled()
-    const provider = providerRegistry.get(providerName || providerRegistry.getDefaultForTask('analysis') || 'openai')
-    const config = modelName ? resolveModelConfig(providerName, modelName) : resolveTaskModelConfig('analysis')
+    const provider = providerRegistry.get(providerRegistry.getDefaultForTask('analysis') || 'openai')
+    const config = resolveTaskModelConfig('analysis')
 
     const messages = [
       { role: 'system', content: `You are a senior software architect. Analyze the user's application description and return a structured JSON response. Do not include markdown code fences. Return only raw JSON.
@@ -490,10 +497,10 @@ Required JSON schema:
     }
   }
 
-  async _planApplication(analysis, projectName, apiKey, providerName, modelName) {
+  async _planApplication(analysis, projectName, apiKey) {
     this._checkCancelled()
-    const provider = providerRegistry.get(providerName || providerRegistry.getDefaultForTask('planning') || 'openai')
-    const config = modelName ? resolveModelConfig(providerName, modelName) : resolveTaskModelConfig('planning')
+    const provider = providerRegistry.get(providerRegistry.getDefaultForTask('planning') || 'openai')
+    const config = resolveTaskModelConfig('planning')
 
     const messages = [
       { role: 'system', content: `You are a senior software architect. Create an application plan based on the requirements analysis. Return only raw JSON, no markdown code fences.
@@ -530,10 +537,10 @@ Required JSON schema:
     }
   }
 
-  async _generateManifest(plan, analysis, apiKey, providerName, modelName) {
+  async _generateManifest(plan, analysis, apiKey) {
     this._checkCancelled()
-    const provider = providerRegistry.get(providerName || providerRegistry.getDefaultForTask('code') || 'openai')
-    const config = modelName ? resolveModelConfig(providerName, modelName) : resolveTaskModelConfig('code')
+    const provider = providerRegistry.get(providerRegistry.getDefaultForTask('code') || 'openai')
+    const config = resolveTaskModelConfig('code')
 
     const pagesList = plan.pages.map((p) => `  - ${p.name} (${p.path})`).join('\n')
     const routesList = (plan.backendRoutes || []).map((r) => `  - ${r.method} ${r.path}`).join('\n')
@@ -574,10 +581,10 @@ Generate these file types:
     }
   }
 
-  async _analyzeModification(instruction, project, existingFileMap, apiKey, providerName, modelName) {
+  async _analyzeModification(instruction, project, existingFileMap, apiKey) {
     this._checkCancelled()
-    const provider = providerRegistry.get(providerName || providerRegistry.getDefaultForTask('chat') || 'openai')
-    const config = modelName ? resolveModelConfig(providerName, modelName) : resolveTaskModelConfig('chat')
+    const provider = providerRegistry.get(providerRegistry.getDefaultForTask('chat') || 'openai')
+    const config = resolveTaskModelConfig('chat')
 
     const filesSummary = Object.entries(existingFileMap)
       .map(([path, content]) => `  ${path} (${content.length} chars)`)

@@ -14,6 +14,7 @@ import { GeminiAdapter } from '../llm/adapters/gemini.js'
 import { AnthropicAdapter } from '../llm/adapters/anthropic.js'
 import { KiloAdapter } from '../llm/adapters/kilo.js'
 import { providerRegistry } from '../llm/registry.js'
+import { activeProviderName } from './config.js'
 
 export class ProviderFactory {
   constructor() {
@@ -40,15 +41,18 @@ export class ProviderFactory {
       providerRegistry.register(name, adapter)
     }
 
-    // Task-type defaults: route each task to the most cost-effective
-    // capable provider. OpenAI is the default for all tasks; Gemini and
-    // Anthropic are available as fallbacks/alternatives.
-    providerRegistry.setDefaultForTask('analysis', 'openai')
-    providerRegistry.setDefaultForTask('planning', 'openai')
-    providerRegistry.setDefaultForTask('code', 'openai')
-    providerRegistry.setDefaultForTask('repair', 'openai')
-    providerRegistry.setDefaultForTask('chat', 'openai')
-    providerRegistry.setDefaultForTask('default', 'openai')
+    // Every task uses the one provider chosen by LLM_PROVIDER ('openai' by default).
+    const active = activeProviderName()
+    if (!['openai', 'gemini'].includes(active)) {
+      throw new Error(`Unsupported LLM_PROVIDER '${active}'. Use 'openai' or 'gemini'.`)
+    }
+    for (const task of ['analysis', 'planning', 'code', 'repair', 'chat', 'default']) {
+      providerRegistry.setDefaultForTask(task, active)
+    }
+    if (!adapters[active].isAvailable()) {
+      // eslint-disable-next-line no-console
+      console.warn(`[llm] LLM_PROVIDER=${active} but its API key is not set in .env`)
+    }
 
     this._registered = true
   }

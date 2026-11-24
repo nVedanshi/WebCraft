@@ -137,9 +137,49 @@ export function resolveModelConfig(providerName, modelName) {
 }
 
 /**
+ * Which provider the platform uses for generation. Set LLM_PROVIDER in .env
+ * ('openai' or 'gemini'). Read at call time so dotenv load order cannot matter.
+ */
+export function activeProviderName() {
+  return (process.env.LLM_PROVIDER || 'openai').trim().toLowerCase()
+}
+
+/**
+ * The Gemini model name comes from GEMINI_MODEL so it can be changed without
+ * a code edit when Google retires a model. TODO(owner): set GEMINI_MODEL to a
+ * current model name from Google AI Studio.
+ */
+export function requireGeminiModel() {
+  const model = (process.env.GEMINI_MODEL || '').trim()
+  if (!model) {
+    throw new Error(
+      'LLM_PROVIDER=gemini needs GEMINI_MODEL in .env (a current model name from Google AI Studio)'
+    )
+  }
+  return model
+}
+
+function geminiConfigFromEnv() {
+  return new ModelConfig({
+    provider: 'gemini',
+    model: requireGeminiModel(),
+    maxTokens: 4096,
+    temperature: 0.2,
+    timeoutMs: 60000,
+    maxRetries: 3,
+    supportsStreaming: true,
+    supportsToolUse: false,
+    // TODO(owner): per-1M-token prices for your chosen model, used for cost tracking
+    costPerInputToken: Number(process.env.GEMINI_COST_INPUT_PER_1M || 0),
+    costPerOutputToken: Number(process.env.GEMINI_COST_OUTPUT_PER_1M || 0),
+  })
+}
+
+/**
  * Resolve a task type to a ModelConfig using TASK_MODEL_MAP.
  */
 export function resolveTaskModelConfig(taskType) {
+  if (activeProviderName() === 'gemini') return geminiConfigFromEnv()
   const mapping = TASK_MODEL_MAP[taskType] || TASK_MODEL_MAP.default
   return resolveModelConfig(mapping.provider, mapping.model)
 }

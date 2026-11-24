@@ -21,7 +21,7 @@ const memoryStore = new Map()
 
 export function getRedis() {
   if (!redis) {
-    redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+    redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6380', {
       maxRetriesPerRequest: 3,
       lazyConnect: true,
     })

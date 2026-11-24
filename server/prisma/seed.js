@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import { readFileSync, readdirSync, statSync } from 'fs'
-import { join } from 'path'
+import { join, relative, sep } from 'path'
 
 const prisma = new PrismaClient()
 
@@ -73,14 +73,16 @@ const templateDefinitions = [
   },
 ]
 
-function collectFiles(dir) {
+function collectFiles(dir, root = dir) {
   const results = []
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const fullPath = join(dir, entry.name)
     if (entry.isDirectory()) {
-      results.push(...collectFiles(fullPath))
+      results.push(...collectFiles(fullPath, root))
     } else {
-      const relativePath = fullPath.replace(TEMPLATES_DIR + '/', '')
+      // Path inside the template (for example src/index.css), always with forward
+      // slashes. Works on Windows too, where join() produces backslashes.
+      const relativePath = relative(root, fullPath).split(sep).join('/')
       const content = readFileSync(fullPath, 'utf8')
       const stat = statSync(fullPath)
       results.push({
@@ -147,6 +149,12 @@ async function main() {
         stack: def.stack,
         isPublished: true,
       },
+    })
+
+    // Remove rows from earlier seeds whose paths are no longer produced
+    // (for example full disk paths stored by the old Windows bug).
+    await prisma.templateFile.deleteMany({
+      where: { templateId: template.id, path: { notIn: files.map((f) => f.path) } },
     })
 
     // Upsert template files

@@ -73,7 +73,7 @@ export class AnthropicAdapter extends LLMProvider {
     const modelConfig = config || this.getModelConfig()
     const { system, conversation } = this._splitSystem(messages)
 
-    const lastError = await this._retry(async (attempt) => {
+    return await this._retry(async (attempt) => {
       try {
         const response = await fetch(`${ANTHROPIC_API_BASE}/messages`, {
           method: 'POST',
@@ -117,15 +117,13 @@ export class AnthropicAdapter extends LLMProvider {
         throw normalizeError(error, 'anthropic')
       }
     }, modelConfig.maxRetries)
-
-    throw lastError
   }
 
   async streamComplete(messages, config, onChunk, apiKey) {
     const modelConfig = config || this.getModelConfig()
     const { system, conversation } = this._splitSystem(messages)
 
-    const lastError = await this._retry(async (attempt) => {
+    return await this._retry(async (attempt) => {
       try {
         const response = await fetch(`${ANTHROPIC_API_BASE}/messages`, {
           method: 'POST',
@@ -208,8 +206,6 @@ export class AnthropicAdapter extends LLMProvider {
         throw normalizeError(error, 'anthropic')
       }
     }, modelConfig.maxRetries)
-
-    throw lastError
   }
 
   async _retry(fn, maxRetries) {

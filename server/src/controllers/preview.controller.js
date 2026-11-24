@@ -4,7 +4,7 @@
  * The actual file serving is done by Express static middleware mounted in
  * app.js, pointing at the build directory returned by the preview service.
  */
-import { getPreview, getPreviewError, invalidatePreview } from '../services/preview/service.js'
+import { buildPreview, getPreview, getPreviewError, invalidatePreview } from '../services/preview/service.js'
 import { projectFileService } from '../services/projectFile.service.js'
 import { AppError, catchAsync } from '../middleware/error.js'
 

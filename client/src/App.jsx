@@ -21,47 +21,54 @@ import { TemplateDetailPage } from './pages/TemplateDetail.jsx'
 import { NotFoundPage } from './pages/NotFound.jsx'
 import { TermsPage, PrivacyPage, SecurityPage, DocsPage } from './pages/Legal.jsx'
 
-const router = createBrowserRouter([
-  // Public routes
-  {
-    path: '/welcome',
-    element: <PublicLayout />,
-    children: [
-      { index: true, element: <WelcomePage /> },
-    ],
-  },
-  { path: '/login', element: <LoginPage /> },
-  { path: '/register', element: <RegisterPage /> },
-  { path: '/forgot-password', element: <ForgotPasswordPage /> },
-  { path: '/reset-password', element: <ResetPasswordPage /> },
+const router = createBrowserRouter(
+  [
+    // Public routes
+    {
+      path: '/welcome',
+      element: <PublicLayout />,
+      children: [
+        { index: true, element: <WelcomePage /> },
+      ],
+    },
+    { path: '/login', element: <LoginPage /> },
+    { path: '/register', element: <RegisterPage /> },
+    { path: '/forgot-password', element: <ForgotPasswordPage /> },
+    { path: '/reset-password', element: <ResetPasswordPage /> },
 
-  // Authenticated routes
+    // Authenticated routes
+    {
+      path: '/',
+      element: <AppLayout />,
+      children: [
+        { index: true, element: <HomePage /> },
+        { path: 'projects', element: <ProjectsPage /> },
+        { path: 'projects/new', element: <ProjectCreatePage /> },
+        { path: 'projects/:projectId', element: <WorkspacePage /> },
+        { path: 'billing', element: <BillingPage /> },
+        { path: 'usage', element: <UsagePage /> },
+        { path: 'templates', element: <TemplatesPage /> },
+        { path: 'templates/:templateId', element: <TemplateDetailPage /> },
+        { path: 'integrations', element: <IntegrationsPage /> },
+        { path: 'settings/profile', element: <SettingsPage /> },
+        { path: 'settings', element: <SettingsPage /> },
+        { path: 'help', element: <HelpPage /> },
+        { path: 'changelog', element: <ChangelogPage /> },
+        { path: '*', element: <NotFoundPage /> },
+      ],
+    },
+    // Public legal / docs pages (linked from footers)
+    { path: '/legal/terms', element: <TermsPage /> },
+    { path: '/legal/privacy', element: <PrivacyPage /> },
+    { path: '/legal/security', element: <SecurityPage /> },
+    { path: '/docs', element: <DocsPage /> },
+  ],
   {
-    path: '/',
-    element: <AppLayout />,
-    children: [
-      { index: true, element: <HomePage /> },
-      { path: 'projects', element: <ProjectsPage /> },
-      { path: 'projects/new', element: <ProjectCreatePage /> },
-      { path: 'projects/:projectId', element: <WorkspacePage /> },
-      { path: 'billing', element: <BillingPage /> },
-      { path: 'usage', element: <UsagePage /> },
-      { path: 'templates', element: <TemplatesPage /> },
-      { path: 'templates/:templateId', element: <TemplateDetailPage /> },
-      { path: 'integrations', element: <IntegrationsPage /> },
-      { path: 'settings/profile', element: <SettingsPage /> },
-      { path: 'settings', element: <SettingsPage /> },
-      { path: 'help', element: <HelpPage /> },
-      { path: 'changelog', element: <ChangelogPage /> },
-      { path: '*', element: <NotFoundPage /> },
-    ],
-  },
-  // Public legal / docs pages (linked from footers)
-  { path: '/legal/terms', element: <TermsPage /> },
-  { path: '/legal/privacy', element: <PrivacyPage /> },
-  { path: '/legal/security', element: <SecurityPage /> },
-  { path: '/docs', element: <DocsPage /> },
-])
+    future: {
+      v7_startTransition: true,
+    },
+  }
+)
 
 export function App() {
   return <RouterProvider router={router} />

@@ -118,7 +118,7 @@ export class KiloAdapter extends LLMProvider {
    */
   async complete(messages, config, apiKey) {
     const modelConfig = config || this.getModelConfig()
-    const lastError = await this._retry(async (attempt) => {
+    return await this._retry(async (attempt) => {
       try {
         const response = await fetch(`${KILO_API_BASE}/chat/completions`, {
           method: 'POST',
@@ -164,8 +164,6 @@ export class KiloAdapter extends LLMProvider {
         throw normalizeError(error, 'kilo')
       }
     }, modelConfig.maxRetries)
-
-    throw lastError
   }
 
   /**
@@ -173,7 +171,7 @@ export class KiloAdapter extends LLMProvider {
    */
   async streamComplete(messages, config, onChunk, apiKey) {
     const modelConfig = config || this.getModelConfig()
-    const lastError = await this._retry(async (attempt) => {
+    return await this._retry(async (attempt) => {
       try {
         const response = await fetch(`${KILO_API_BASE}/chat/completions`, {
           method: 'POST',
@@ -263,8 +261,6 @@ export class KiloAdapter extends LLMProvider {
         throw normalizeError(error, 'kilo')
       }
     }, modelConfig.maxRetries)
-
-    throw lastError
   }
 
   /**

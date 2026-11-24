@@ -67,7 +67,7 @@ export class OpenAIAdapter extends LLMProvider {
     const modelConfig = config || this.getModelConfig()
     const client = this._getClient(apiKey)
 
-    const lastError = await this._retry(async (attempt) => {
+    return await this._retry(async (attempt) => {
       try {
         const response = await client.chat.completions.create({
           model: modelConfig.model,
@@ -94,8 +94,6 @@ export class OpenAIAdapter extends LLMProvider {
         throw normalizeError(error, 'openai')
       }
     }, modelConfig.maxRetries)
-
-    throw lastError
   }
 
   /**
@@ -105,7 +103,7 @@ export class OpenAIAdapter extends LLMProvider {
     const modelConfig = config || this.getModelConfig()
     const client = this._getClient(apiKey)
 
-    const lastError = await this._retry(async (attempt) => {
+    return await this._retry(async (attempt) => {
       try {
         const stream = await client.chat.completions.create({
           model: modelConfig.model,
@@ -151,8 +149,6 @@ export class OpenAIAdapter extends LLMProvider {
         throw normalizeError(error, 'openai')
       }
     }, modelConfig.maxRetries)
-
-    throw lastError
   }
 
   /**

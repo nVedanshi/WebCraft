@@ -28,22 +28,22 @@ export const generationController = {
    * Runs synchronously for MVP with full credit enforcement.
    */
   generate: catchAsync(async (req, res) => {
-    const { prompt, projectName, model, provider, framework, database } = req.validatedBody || req.body
+    const { prompt, projectName, projectId } = req.validatedBody || req.body
     const userId = req.user.id
 
     // ── Step 0: Check BYOK status ──
-    // Use the user's selected provider (defaults to 'openai' if not specified)
-    const providerName = provider || 'openai'
-    const byokActive = await isByokActive(userId, providerName)
+    // If the user has connected their own provider key with billingMode='byok',
+    // generation uses their key and NO WebCraft credits are deducted.
+    const byokActive = await isByokActive(userId, 'openai')
     let apiKey = null
     let reservation = null
     if (byokActive) {
-      const creds = await resolveProviderCredentials(userId, providerName)
+      const creds = await resolveProviderCredentials(userId, 'openai')
       apiKey = creds.apiKey
     } else {
       // ── Step 1: Check credits and estimate cost ──
       const estimatedCredits = await pricingEngine.estimateCredits(
-        model || 'kilo', // default provider for estimation
+        'kilo', // default provider for estimation
         'anthropic/claude-3-haiku',
         prompt.length * 4, // rough estimate: ~4 tokens per word
         2000 // rough output estimate
@@ -79,10 +79,7 @@ export const generationController = {
         userId,
         prompt,
         projectName,
-        provider: providerName,
-        model,
-        framework,
-        database,
+        projectId,
         byokMode: byokActive,
         apiKey,
         progressCallback: undefined,
@@ -162,17 +159,16 @@ export const generationController = {
    * Returns immediately with a jobId; credits are reserved when the job runs.
    */
   generateAsync: catchAsync(async (req, res) => {
-    const { prompt, projectName, model, provider, framework, database } = req.validatedBody || req.body
+    const { prompt, projectName, projectId } = req.validatedBody || req.body
     const userId = req.user.id
 
     // ── Step 0: Check BYOK status ──
-    const providerName = provider || 'openai'
-    const byokActive = await isByokActive(userId, providerName)
+    const byokActive = await isByokActive(userId, 'openai')
     let reservation = null
     if (!byokActive) {
       // Estimate credits and check availability before queueing
       const estimatedCredits = await pricingEngine.estimateCredits(
-        model || 'kilo',
+        'kilo',
         'anthropic/claude-3-haiku',
         prompt.length * 4,
         2000
@@ -200,25 +196,14 @@ export const generationController = {
       )
     }
 
-    // Resolve BYOK apiKey for the job worker
-    let apiKey = null
-    if (byokActive) {
-      const creds = await resolveProviderCredentials(userId, providerName)
-      apiKey = creds.apiKey
-    }
-
     const job = await getGenerationJobQueue().add('generate', {
       userId,
       prompt,
       projectName,
-      provider: providerName,
-      model,
-      framework,
-      database,
+      projectId,
       reservationId: reservation?.reservationId,
       estimatedCredits: reservation?.amount,
       byokMode: byokActive,
-      apiKey,
     })
 
     res.status(202).json({
@@ -240,16 +225,12 @@ export const generationController = {
     const { projectId, instruction, expectedRevisionId } = req.validatedBody || req.body
     const userId = req.user.id
 
-    // Verify project access to get its settings (model/provider)
-    const project = await projectService.getProject(userId, projectId)
-    const providerName = (project.settings?.provider || 'openai')
-
     // ── Step 0: Check BYOK status ──
-    const byokActive = await isByokActive(userId, providerName)
+    const byokActive = await isByokActive(userId, 'openai')
     let apiKey = null
     let reservation = null
     if (byokActive) {
-      const creds = await resolveProviderCredentials(userId, providerName)
+      const creds = await resolveProviderCredentials(userId, 'openai')
       apiKey = creds.apiKey
     } else {
       // Check credits for modification
@@ -288,10 +269,6 @@ export const generationController = {
         userId,
         instruction,
         expectedRevisionId,
-        provider: providerName,
-        model: project.settings?.model,
-        framework: project.settings?.framework,
-        database: project.settings?.database,
         byokMode: byokActive,
         apiKey,
       })

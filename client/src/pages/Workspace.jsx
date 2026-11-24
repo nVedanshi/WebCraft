@@ -50,7 +50,7 @@ import { deploymentApi } from '../lib/deploymentApi.js'
 export function WorkspacePage() {
   const { projectId } = useParams()
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuthStore()
 
   // ── Project state ──
@@ -96,7 +96,7 @@ export function WorkspacePage() {
   const [deployStatus, setDeployStatus] = useState(null)
   const [deployHistory, setDeployHistory] = useState([])
   const [publishDialogOpen, setPublishDialogOpen] = useState(false)
-  const [publishMode, setPublishMode] = useState<'publish' | 'republish'>('publish')
+  const [publishMode, setPublishMode] = useState('publish')
   const [publishCommitMessage, setPublishCommitMessage] = useState('')
   const [rollbackDialogOpen, setRollbackDialogOpen] = useState(false)
   const [rollbackVersionId, setRollbackVersionId] = useState('')
@@ -105,6 +105,58 @@ export function WorkspacePage() {
   const editorRef = useRef(null)
   const chatEndRef = useRef(null)
   const tabContainerRef = useRef(null)
+
+  // ── AI chat state ──
+  const [chatMessages, setChatMessages] = useState([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+
+  // ── Generation state ──
+  const [generating, setGenerating] = useState(false)
+  const [generationProgress, setGenerationProgress] = useState(0)
+  const [generationStage, setGenerationStage] = useState('')
+
+  // ── File operation dialogs ──
+  const [showNewFileDialog, setShowNewFileDialog] = useState(false)
+  const [showRenameDialog, setShowRenameDialog] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [fileOperationName, setFileOperationName] = useState('')
+  const [fileOperationType, setFileOperationType] = useState('file')
+
+  // ── Project settings dialog ──
+  const [showSettingsDialog, setShowSettingsDialog] = useState(false)
+  const [settingsName, setSettingsName] = useState('')
+  const [settingsDescription, setSettingsDescription] = useState('')
+
+  // ── Misc status ──
+  const [busy, setBusy] = useState('')
+  const [notice, setNotice] = useState(null)
+  const [error, setError] = useState(null)
+
+  // Mark a file dirty/clean
+  const setModified = useCallback((path, modified) => {
+    setDirtyFiles((prev) => {
+      const next = new Set(prev)
+      if (modified) next.add(path)
+      else next.delete(path)
+      return next
+    })
+  }, [])
+
+  // Scroll an open tab into view (no-op if the tab bar isn't mounted yet)
+  const scrollTabIntoView = useCallback((path) => {
+    requestAnimationFrame(() => {
+      const el = tabContainerRef.current?.querySelector(`[data-tab-path="${CSS.escape(path)}"]`)
+      el?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    })
+  }, [])
+
+  // Auto-dismiss notices
+  useEffect(() => {
+    if (!notice) return
+    const t = setTimeout(() => setNotice(null), 4000)
+    return () => clearTimeout(t)
+  }, [notice])
 
   const activeFile = useMemo(() => {
     if (!activePath) return null
@@ -119,15 +171,27 @@ export function WorkspacePage() {
   const isDirty = useCallback((path) => dirtyFiles.has(path), [dirtyFiles])
 
   // ── Lifecycle ──
+  // Load everything once per project (NOT on every tab/panel change)
   useEffect(() => {
     loadProject()
     loadGitHubStatus()
     loadDeployStatus()
     loadDeployHistory()
+  }, [projectId])
+
+  // Start generation exactly once when arriving from "Create & generate"
+  const generationStartedRef = useRef(false)
+  useEffect(() => {
     const generateParam = searchParams.get('generate')
-    if (generateParam) {
-      startGeneration(generateParam)
-    }
+    if (!generateParam || generationStartedRef.current) return
+    generationStartedRef.current = true
+    // Remove the param so a refresh doesn't trigger (and bill) another generation
+    setSearchParams({}, { replace: true })
+    startGeneration(generateParam)
+  }, [projectId])
+
+  // Keyboard shortcuts
+  useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.ctrlKey || e.metaKey) {
         switch (e.key) {
@@ -156,7 +220,7 @@ export function WorkspacePage() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [projectId, searchParams, activePath, previewOpen, aiPanelOpen])
+  }, [activePath, previewOpen, aiPanelOpen, openTabs])
 
   useEffect(() => {
     if (chatEndRef.current) {
@@ -172,6 +236,8 @@ export function WorkspacePage() {
       const res = await api.get(`/projects/${projectId}`)
       const data = res.data.data
       setProject(data.project)
+      setSettingsName(data.project.name || '')
+      setSettingsDescription(data.project.description || '')
       setRevisionId(data.project.revisionId)
       setFiles(data.files || [])
       setFileContents({})
@@ -357,6 +423,7 @@ export function WorkspacePage() {
     setGenerationStage('Initializing...')
 
     try {
+      // projectId tells the server to fill THIS project instead of creating a new one
       const res = await generationApi.generateAsync({
         projectId,
         prompt,
@@ -364,37 +431,55 @@ export function WorkspacePage() {
 
       if (res.data?.data?.jobId) {
         pollGeneration(res.data.data.jobId)
+      } else {
+        setGenerating(false)
+        setError('Generation did not start (no job id returned).')
       }
     } catch (err) {
       console.error('Generation failed', err)
       setGenerating(false)
+      setError(err?.response?.data?.error?.message || 'Generation failed to start')
     }
   }
 
   async function pollGeneration(jobId) {
+    let failures = 0
     const interval = setInterval(async () => {
       try {
         const res = await generationApi.getJob(jobId)
-        const job = res.data?.data?.job
-        if (job) {
-          setGenerationProgress(job.progress || 0)
-          setGenerationStage(job.currentStage || 'Processing...')
+        // Server shape: { jobId, status, progress, returnValue, failedReason }
+        const job = res.data?.data
+        failures = 0
+        if (!job) return
 
-          if (job.status === 'COMPLETED') {
-            clearInterval(interval)
-            setGenerating(false)
-            setGenerationProgress(100)
-            loadProject()
-            checkPreviewStatus()
-          } else if (job.status === 'FAILED') {
-            clearInterval(interval)
-            setGenerating(false)
-          }
+        setGenerationProgress(typeof job.progress === 'number' ? job.progress : 0)
+        setGenerationStage(
+          job.status === 'waiting' || job.status === 'delayed' ? 'Queued...' : 'Generating your project...'
+        )
+
+        if (job.status === 'completed') {
+          clearInterval(interval)
+          setGenerating(false)
+          setGenerationProgress(100)
+          setNotice('Project generated.')
+          await loadProject()
+          setPreviewOpen(true)
+          rebuildPreview()
+        } else if (job.status === 'failed') {
+          clearInterval(interval)
+          setGenerating(false)
+          setError(job.failedReason || 'Generation failed')
         }
       } catch (err) {
         console.error('Poll failed', err)
+        failures += 1
+        if (failures >= 5) {
+          clearInterval(interval)
+          setGenerating(false)
+          setError('Lost connection while checking generation status.')
+        }
       }
-    }, 1000)
+    }, 1500)
 
     return () => clearInterval(interval)
   }
@@ -412,8 +497,8 @@ export function WorkspacePage() {
     try {
       const res = await generationApi.modify({
         projectId,
-        prompt: chatInput,
-        context: { files: files.map((f) => ({ path: f.path, content: f.content || '' })) },
+        instruction: chatInput,
+        expectedRevisionId: revisionId || undefined,
       })
 
       const data = res.data.data
@@ -440,9 +525,10 @@ export function WorkspacePage() {
         }
       }
     } catch (err) {
+      const msg = err?.response?.data?.error?.message
       setChatMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: 'Sorry, I encountered an error applying your changes. Please try again.' },
+        { role: 'assistant', content: msg ? `Sorry: ${msg}` : 'Sorry, I encountered an error applying your changes. Please try again.' },
       ])
     } finally {
       setChatLoading(false)
@@ -790,7 +876,7 @@ export function WorkspacePage() {
                   onClick={handlePullFromGitHub}
                   disabled={busy === 'pull' || githubLoading}
                 >
-                  <Sync className="w-3 h-3 mr-1" /> Pull
+                  <RefreshCw className="w-3 h-3 mr-1" /> Pull
                 </Button>
                 <Button
                   size="sm"
@@ -805,7 +891,7 @@ export function WorkspacePage() {
                   onClick={handleSyncWithGitHub}
                   disabled={busy === 'sync' || githubLoading}
                 >
-                  <Sync className="w-3 h-3 mr-1" /> Sync
+                  <RefreshCw className="w-3 h-3 mr-1" /> Sync
                 </Button>
               </div>
             </div>
@@ -927,6 +1013,20 @@ export function WorkspacePage() {
       </div>
 
       {/* Generation progress */}
+      {(notice || error) && (
+        <div
+          className={clsx(
+            'px-4 py-2 text-xs flex items-center justify-between border-b',
+            error ? 'bg-red-900/20 border-red-500/30 text-red-300' : 'bg-success/10 border-success/20 text-success'
+          )}
+        >
+          <span>{error || notice}</span>
+          <button onClick={() => { setError(null); setNotice(null) }} className="ml-4 opacity-70 hover:opacity-100">
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
       {generating && (
         <div className="bg-accent/10 border-b border-accent/20 px-4 py-2">
           <div className="flex items-center gap-3">
@@ -1053,7 +1153,7 @@ export function WorkspacePage() {
         {/* Tab bar */}
         <div className="flex-1 flex flex-col bg-background">
           {openTabs.length > 0 ? (
-            <div className="h-10 bg-surface border-b border-border flex overflow-x-auto px-2 py-1">
+            <div ref={tabContainerRef} className="h-10 bg-surface border-b border-border flex overflow-x-auto px-2 py-1">
               {openTabs.map((path) => {
                 const isActive = activePath === path
                 const isDirty = dirtyFiles.has(path)
@@ -1061,6 +1161,7 @@ export function WorkspacePage() {
                 return (
                   <div
                     key={path}
+                    data-tab-path={path}
                     onClick={() => setActivePath(path)}
                     onContextMenu={(e) => {
                       e.preventDefault()
@@ -1461,7 +1562,7 @@ export function WorkspacePage() {
             <div key={c.path} className="border border-border rounded-lg p-4 bg-surface">
               <div className="flex items-start gap-3 mb-2">
                 <div className="flex-shrink-0">
-                  <Code className="w-4 h-4 text-secondary" />
+                  <Code2 className="w-4 h-4 text-secondary" />
                 </div>
                 <div className="flex-1">
                   <p className="text-sm font-medium text-foreground">{c.path}</p>

@@ -12,7 +12,7 @@ process.env.JWT_ACCESS_SECRET = 'test-access-secret'
 process.env.JWT_REFRESH_SECRET = 'test-refresh-secret'
 process.env.ENCRYPTION_KEY = 'test-encryption-key-32-bytes-long!!!'
 process.env.NODE_ENV = 'test'
-process.env.REDIS_URL = 'redis://localhost:6379'
+process.env.REDIS_URL = 'redis://localhost:6380'
 process.env.RATE_LIMIT_MAX_REQUESTS = '10000'
 
 // Apply migrations to the test database

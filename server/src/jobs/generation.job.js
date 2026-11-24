@@ -21,7 +21,7 @@ import { publishProgress, completeProgress } from './progress.js'
 
 const BULLMQ_REDIS_CONFIG = {
   host: 'localhost',
-  port: 6379,
+  port: 6380,
   maxRetriesPerRequest: null,
   lazyConnect: true,
 }
@@ -90,7 +90,7 @@ export function getGenerationWorker() {
  * Process a 'generate' job: run the full generation pipeline.
  */
 async function processGenerateJob(job) {
-  const { userId, prompt, projectName, provider, model, framework, database, byokMode, apiKey } = job.data
+  const { userId, prompt, projectName, projectId } = job.data
 
   // Report progress through BullMQ's built-in progress AND SSE
   await job.updateProgress(5)
@@ -100,12 +100,7 @@ async function processGenerateJob(job) {
     userId,
     prompt,
     projectName,
-    provider,
-    model,
-    framework,
-    database,
-    byokMode,
-    apiKey,
+    projectId,
     progressCallback: ({ stage, status, message }) => {
       publishProgress(job.id, { type: 'stage', stage, status, message })
     },
